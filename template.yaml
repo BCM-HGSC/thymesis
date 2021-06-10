@@ -1,0 +1,73 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: The combination of an S3 bucket and SQS queue where new objects in
+  the bucket are automatically reported to the queue. The messages in the queue
+  point back to the object keys in the bucket. The objects are considered the
+  actual payload. The effect is a queue that retains the messages indefinitely.
+
+Parameters:
+  ResourcePrefix:
+    Description: The first part of the resource names
+    Type: String
+    Default: hgsc-thymesis
+
+Resources:
+
+  MyQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ResourcePrefix}-${AWS::StackName}-queue"
+      MessageRetentionPeriod: 1209600  # fortnight
+      VisibilityTimeout: 20  # very short
+
+  MyQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref MyQueue
+      PolicyDocument:
+        Id: !Sub "${ResourcePrefix}-${AWS::StackName}-queue-policy"
+        Version: "2012-10-17"
+        Statement:
+          - Sid: Allow-S3-SendMessage
+            Effect: Allow
+            Principal:  
+              Service: s3.amazonaws.com
+            Action: SQS:SendMessage
+            Resource: !GetAtt MyQueue.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:s3:::${ResourcePrefix}-${AWS::StackName}-bucket"
+
+  MyBucket:
+    DependsOn: MyQueuePolicy
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ResourcePrefix}-${AWS::StackName}-bucket"
+      AccessControl: Private
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Queue: !GetAtt MyQueue.Arn
+
+Outputs:
+  AccountId:
+    Description: Amazon account ID for this stack
+    Value: !Ref AWS::AccountId
+  BucketName:
+    Description: Name of the Amazon S3 bucket with a notification configuration
+    Value: !Ref MyBucket
+  BucketArn:
+    Description: ARN of the Amazon S3 bucket with a notification configuration
+    Value: !GetAtt MyBucket.Arn
+  QueueName:
+    Description: "Name of new Amazon SQS Queue"
+    Value: !GetAtt MyQueue.QueueName
+  QueueARN:
+    Description: "ARN of new Amazon SQS Queue"
+    Value: !GetAtt MyQueue.Arn
+  QueueURL:
+    Description: URL of new Amazon SQS Queue
+    Value: !Ref MyQueue
